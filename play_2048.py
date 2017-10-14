@@ -58,57 +58,71 @@ def left(driver):
 	actions.perform()
 
 def main():
-	driver = webdriver.Chrome()
-	driver.get('http://2048game.com/')
-	
-	if not __manual__:
-		collection_data = __2048_moves_collection__.find()
-		df = pandas.DataFrame(list(collection_data))
-		df.drop(['_id', 'table', 'choice'], 1, inplace=True)
-		x, y = df.drop(['n_choice'], 1).values, df['n_choice'].values
-
-		classifier = VotingClassifier([('knc', neighbors.KNeighborsClassifier()),
-		                            ('lsvc', svm.LinearSVC()),
-		                            ('rfc', RandomForestClassifier()),
-		                            ('dtc', DecisionTreeClassifier())])
-		classifier.fit(x, y)
-	
-	last_table = None
-	while not is_game_over(driver):
-		table = parse_table_from_page(driver)
+	while True:
+		driver = webdriver.Chrome()
+		driver.get('http://2048game.com/')
+		
+		pickle_file = None
 		if not __manual__:
-			# print_table(table)
-			choice = classifier.predict([[table[0][0], table[0][1], table[0][2], table[0][3], table[1][0], table[1][1], table[1][2], table[1][3], table[2][0], table[2][1], table[2][2], table[2][3], table[3][0], table[3][1], table[3][2], table[3][3]]])
-			if table == last_table:
-				choice = randint(1, 4)
-			print(choice)
-			if choice == 1:
-				up(driver)
-			elif choice == 2:
-				right(driver)
-			elif choice == 3:
-				down(driver)
-			elif choice == 4:
-				left(driver)
-			last_table = table
-		else:
-			choice = input()
-			if choice == 'w':
-				up(driver)
-				__2048_moves_collection__.insert({'table': table, 'choice': 'U', 'n_choice': 1, 'cell_1_1': table[0][0], 'cell_1_2': table[0][1], 'cell_1_3': table[0][2], 'cell_1_4': table[0][3], 'cell_2_1': table[1][0], 'cell_2_2': table[1][1], 'cell_2_3': table[1][2], 'cell_2_4': table[1][3], 'cell_3_1': table[2][0], 'cell_3_2': table[2][1], 'cell_3_3': table[2][2], 'cell_3_4': table[2][3], 'cell_4_1': table[3][0], 'cell_4_2': table[3][1], 'cell_4_3': table[3][2], 'cell_4_4': table[3][3]})
-			elif choice == 'd':
-				right(driver)
-				__2048_moves_collection__.insert({'table': table, 'choice': 'R', 'n_choice': 2, 'cell_1_1': table[0][0], 'cell_1_2': table[0][1], 'cell_1_3': table[0][2], 'cell_1_4': table[0][3], 'cell_2_1': table[1][0], 'cell_2_2': table[1][1], 'cell_2_3': table[1][2], 'cell_2_4': table[1][3], 'cell_3_1': table[2][0], 'cell_3_2': table[2][1], 'cell_3_3': table[2][2], 'cell_3_4': table[2][3], 'cell_4_1': table[3][0], 'cell_4_2': table[3][1], 'cell_4_3': table[3][2], 'cell_4_4': table[3][3]})
-			elif choice == 's':
-				down(driver)
-				__2048_moves_collection__.insert({'table': table, 'choice': 'D', 'n_choice': 3, 'cell_1_1': table[0][0], 'cell_1_2': table[0][1], 'cell_1_3': table[0][2], 'cell_1_4': table[0][3], 'cell_2_1': table[1][0], 'cell_2_2': table[1][1], 'cell_2_3': table[1][2], 'cell_2_4': table[1][3], 'cell_3_1': table[2][0], 'cell_3_2': table[2][1], 'cell_3_3': table[2][2], 'cell_3_4': table[2][3], 'cell_4_1': table[3][0], 'cell_4_2': table[3][1], 'cell_4_3': table[3][2], 'cell_4_4': table[3][3]})
-			elif choice == 'a':
-				left(driver)
-				__2048_moves_collection__.insert({'table': table, 'choice': 'L', 'n_choice': 4, 'cell_1_1': table[0][0], 'cell_1_2': table[0][1], 'cell_1_3': table[0][2], 'cell_1_4': table[0][3], 'cell_2_1': table[1][0], 'cell_2_2': table[1][1], 'cell_2_3': table[1][2], 'cell_2_4': table[1][3], 'cell_3_1': table[2][0], 'cell_3_2': table[2][1], 'cell_3_3': table[2][2], 'cell_3_4': table[2][3], 'cell_4_1': table[3][0], 'cell_4_2': table[3][1], 'cell_4_3': table[3][2], 'cell_4_4': table[3][3]})
-			elif choice == 'exit':
-				break
-	
-	driver.quit()
+			#pickle_file = open('2872_score_2048_game.pickle', 'rb')
+			if pickle_file is None:
+				collection_data = __2048_moves_collection__.find()
+				df = pandas.DataFrame(list(collection_data))
+				df.drop(['_id', 'table', 'choice'], 1, inplace=True)
+				df = df.sample(frac=1)
+				x, y = df.drop(['n_choice'], 1).values, df['n_choice'].values
+
+				classifier = VotingClassifier([('knc', neighbors.KNeighborsClassifier()),
+												('lsvc', svm.LinearSVC()),
+												('rfc', RandomForestClassifier()),
+												('dtc', DecisionTreeClassifier())])
+				classifier.fit(x, y)
+			else:
+				classifier = pickle.load(pickle_file)
+		last_table = None
+		move_counter = 0
+		while not is_game_over(driver):
+			table = parse_table_from_page(driver)
+			if not __manual__:
+				# print_table(table)
+				choice = classifier.predict([[table[0][0], table[0][1], table[0][2], table[0][3], table[1][0], table[1][1], table[1][2], table[1][3], table[2][0], table[2][1], table[2][2], table[2][3], table[3][0], table[3][1], table[3][2], table[3][3]]])
+				if table == last_table:
+					choice = randint(1, 4)
+				#print(choice)
+				if choice == 1:
+					up(driver)
+				elif choice == 2:
+					right(driver)
+				elif choice == 3:
+					down(driver)
+				elif choice == 4:
+					left(driver)
+				last_table = table
+			else:
+				choice = input()
+				if choice == 'w':
+					up(driver)
+					__2048_moves_collection__.insert({'table': table, 'choice': 'U', 'n_choice': 1, 'cell_1_1': table[0][0], 'cell_1_2': table[0][1], 'cell_1_3': table[0][2], 'cell_1_4': table[0][3], 'cell_2_1': table[1][0], 'cell_2_2': table[1][1], 'cell_2_3': table[1][2], 'cell_2_4': table[1][3], 'cell_3_1': table[2][0], 'cell_3_2': table[2][1], 'cell_3_3': table[2][2], 'cell_3_4': table[2][3], 'cell_4_1': table[3][0], 'cell_4_2': table[3][1], 'cell_4_3': table[3][2], 'cell_4_4': table[3][3]})
+				elif choice == 'd':
+					right(driver)
+					__2048_moves_collection__.insert({'table': table, 'choice': 'R', 'n_choice': 2, 'cell_1_1': table[0][0], 'cell_1_2': table[0][1], 'cell_1_3': table[0][2], 'cell_1_4': table[0][3], 'cell_2_1': table[1][0], 'cell_2_2': table[1][1], 'cell_2_3': table[1][2], 'cell_2_4': table[1][3], 'cell_3_1': table[2][0], 'cell_3_2': table[2][1], 'cell_3_3': table[2][2], 'cell_3_4': table[2][3], 'cell_4_1': table[3][0], 'cell_4_2': table[3][1], 'cell_4_3': table[3][2], 'cell_4_4': table[3][3]})
+				elif choice == 's':
+					down(driver)
+					__2048_moves_collection__.insert({'table': table, 'choice': 'D', 'n_choice': 3, 'cell_1_1': table[0][0], 'cell_1_2': table[0][1], 'cell_1_3': table[0][2], 'cell_1_4': table[0][3], 'cell_2_1': table[1][0], 'cell_2_2': table[1][1], 'cell_2_3': table[1][2], 'cell_2_4': table[1][3], 'cell_3_1': table[2][0], 'cell_3_2': table[2][1], 'cell_3_3': table[2][2], 'cell_3_4': table[2][3], 'cell_4_1': table[3][0], 'cell_4_2': table[3][1], 'cell_4_3': table[3][2], 'cell_4_4': table[3][3]})
+				elif choice == 'a':
+					left(driver)
+					__2048_moves_collection__.insert({'table': table, 'choice': 'L', 'n_choice': 4, 'cell_1_1': table[0][0], 'cell_1_2': table[0][1], 'cell_1_3': table[0][2], 'cell_1_4': table[0][3], 'cell_2_1': table[1][0], 'cell_2_2': table[1][1], 'cell_2_3': table[1][2], 'cell_2_4': table[1][3], 'cell_3_1': table[2][0], 'cell_3_2': table[2][1], 'cell_3_3': table[2][2], 'cell_3_4': table[2][3], 'cell_4_1': table[3][0], 'cell_4_2': table[3][1], 'cell_4_3': table[3][2], 'cell_4_4': table[3][3]})
+				elif choice == 'exit':
+					break
+			move_counter += 1
+		
+		score = int(driver.find_element_by_css_selector('div.score-container').text.split('\n')[0])
+		print('Score:', score)
+		print('Number of moves:', move_counter)
+		if not __manual__ and pickle_file is None:
+			with open(str(score) + '_score_2048_game.pickle', 'wb') as f:
+				pickle.dump(classifier, f)
+		driver.quit()
 
 if __name__ == "__main__":
     main()
