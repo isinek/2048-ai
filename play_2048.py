@@ -1,6 +1,6 @@
-from random import randint
+from sys import argv
 from time import sleep
-import numpy
+import uuid
 import pandas
 import pickle
 from pymongo import MongoClient
@@ -9,13 +9,14 @@ from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.common.keys import Keys
 from sklearn import cross_validation, linear_model, svm, neighbors
 from sklearn.ensemble import VotingClassifier, RandomForestClassifier
+from sklearn.linear_model import LogisticRegression
 from sklearn.tree import DecisionTreeClassifier
-
-__manual__ = False
 
 __mongo_client__ = MongoClient()
 __2048_database__ = __mongo_client__.game_2048
 __2048_moves_collection__ = __2048_database__.moves
+__2048_scaled_moves_collection__ = __2048_database__.scaled_moves
+__2048_results_collection__ = __2048_database__.results
 
 def is_game_over(driver):
 	game_over = True
@@ -25,13 +26,20 @@ def is_game_over(driver):
 		game_over = False
 	return game_over
 
-def parse_table_from_page(driver):
+def parse_table_from_page(driver, scaled):
 	html_tile_container = driver.find_element_by_css_selector('div.tile-container')
 	html_tiles = html_tile_container.find_elements_by_css_selector('div.tile')
 	tiles = [[0 for _ in range(4)] for _ in range(4)]
+	max_val = 0
 	for tile in html_tiles:
 		classes = tile.get_attribute('class').split()
 		tiles[int(classes[2].split('-')[3])-1][int(classes[2].split('-')[2])-1] = int(classes[1].split('-')[1])
+		if int(classes[1].split('-')[1]) > max_val:
+			max_val = int(classes[1].split('-')[1])
+	if scaled:
+		for i in range(4):
+			for j in range(4):
+				tiles[i][i] /= max_val
 	return tiles
 
 def print_table(table):
@@ -57,37 +65,59 @@ def left(driver):
 	actions.send_keys(Keys.ARROW_LEFT)
 	actions.perform()
 
-def main():
-	while True:
+def main(manual, scaled, shuffle, number_of_repeats, pickled_classifier):
+	while number_of_repeats != 0:
 		driver = webdriver.Chrome()
 		driver.get('http://2048game.com/')
-		
+		game_id = str(uuid.uuid4())
 		pickle_file = None
-		if not __manual__:
-			#pickle_file = open('2872_score_2048_game.pickle', 'rb')
+		classifier = None
+		if not manual:
+			if not pickled_classifier is None:
+				pickle_file = open(pickled_classifier, 'rb')
 			if pickle_file is None:
-				collection_data = __2048_moves_collection__.find()
+				if scaled:
+					collection_data = __2048_scaled_moves_collection__.find()
+				else:
+					collection_data = __2048_moves_collection__.find()
 				df = pandas.DataFrame(list(collection_data))
-				df.drop(['_id', 'table', 'choice'], 1, inplace=True)
-				df = df.sample(frac=1)
+				df.drop(['_id', 'table', 'choice', 'game_id'], 1, inplace=True)
+				if 'generated' in df:
+					df.drop(['generated'], 1, inplace=True)
+				if shuffle:
+					df = df.sample(frac=1)
 				x, y = df.drop(['n_choice'], 1).values, df['n_choice'].values
 
-				classifier = VotingClassifier([('knc', neighbors.KNeighborsClassifier()),
-												('lsvc', svm.LinearSVC()),
-												('rfc', RandomForestClassifier()),
-												('dtc', DecisionTreeClassifier())])
+				classifier = VotingClassifier([ ('rfc', RandomForestClassifier()),
+												('dtc', DecisionTreeClassifier()),
+												('lr', LogisticRegression()) ])
+				
 				classifier.fit(x, y)
 			else:
 				classifier = pickle.load(pickle_file)
 		last_table = None
+		illegal_choices = 0
 		move_counter = 0
 		while not is_game_over(driver):
-			table = parse_table_from_page(driver)
-			if not __manual__:
+			table = parse_table_from_page(driver, scaled)
+			if not manual:
 				# print_table(table)
 				choice = classifier.predict([[table[0][0], table[0][1], table[0][2], table[0][3], table[1][0], table[1][1], table[1][2], table[1][3], table[2][0], table[2][1], table[2][2], table[2][3], table[3][0], table[3][1], table[3][2], table[3][3]]])
 				if table == last_table:
-					choice = randint(1, 4)
+					illegal_choices += 1
+				else:
+					illegal_choices = 0
+				if illegal_choices == 1:
+					choice = 3
+				elif illegal_choices == 2:
+					choice = 2
+				elif illegal_choices == 3:
+					choice = 4
+				elif illegal_choices == 4:
+					choice = 1
+				elif illegal_choices > 5:
+					break
+				
 				#print(choice)
 				if choice == 1:
 					up(driver)
@@ -98,20 +128,21 @@ def main():
 				elif choice == 4:
 					left(driver)
 				last_table = table
+				sleep(.05)
 			else:
 				choice = input()
 				if choice == 'w':
 					up(driver)
-					__2048_moves_collection__.insert({'table': table, 'choice': 'U', 'n_choice': 1, 'cell_1_1': table[0][0], 'cell_1_2': table[0][1], 'cell_1_3': table[0][2], 'cell_1_4': table[0][3], 'cell_2_1': table[1][0], 'cell_2_2': table[1][1], 'cell_2_3': table[1][2], 'cell_2_4': table[1][3], 'cell_3_1': table[2][0], 'cell_3_2': table[2][1], 'cell_3_3': table[2][2], 'cell_3_4': table[2][3], 'cell_4_1': table[3][0], 'cell_4_2': table[3][1], 'cell_4_3': table[3][2], 'cell_4_4': table[3][3]})
+					__2048_moves_collection__.insert({'game_id': game_id, 'table': table, 'choice': 'U', 'n_choice': 1, 'cell_1_1': table[0][0], 'cell_1_2': table[0][1], 'cell_1_3': table[0][2], 'cell_1_4': table[0][3], 'cell_2_1': table[1][0], 'cell_2_2': table[1][1], 'cell_2_3': table[1][2], 'cell_2_4': table[1][3], 'cell_3_1': table[2][0], 'cell_3_2': table[2][1], 'cell_3_3': table[2][2], 'cell_3_4': table[2][3], 'cell_4_1': table[3][0], 'cell_4_2': table[3][1], 'cell_4_3': table[3][2], 'cell_4_4': table[3][3]})
 				elif choice == 'd':
 					right(driver)
-					__2048_moves_collection__.insert({'table': table, 'choice': 'R', 'n_choice': 2, 'cell_1_1': table[0][0], 'cell_1_2': table[0][1], 'cell_1_3': table[0][2], 'cell_1_4': table[0][3], 'cell_2_1': table[1][0], 'cell_2_2': table[1][1], 'cell_2_3': table[1][2], 'cell_2_4': table[1][3], 'cell_3_1': table[2][0], 'cell_3_2': table[2][1], 'cell_3_3': table[2][2], 'cell_3_4': table[2][3], 'cell_4_1': table[3][0], 'cell_4_2': table[3][1], 'cell_4_3': table[3][2], 'cell_4_4': table[3][3]})
+					__2048_moves_collection__.insert({'game_id': game_id, 'table': table, 'choice': 'R', 'n_choice': 2, 'cell_1_1': table[0][0], 'cell_1_2': table[0][1], 'cell_1_3': table[0][2], 'cell_1_4': table[0][3], 'cell_2_1': table[1][0], 'cell_2_2': table[1][1], 'cell_2_3': table[1][2], 'cell_2_4': table[1][3], 'cell_3_1': table[2][0], 'cell_3_2': table[2][1], 'cell_3_3': table[2][2], 'cell_3_4': table[2][3], 'cell_4_1': table[3][0], 'cell_4_2': table[3][1], 'cell_4_3': table[3][2], 'cell_4_4': table[3][3]})
 				elif choice == 's':
 					down(driver)
-					__2048_moves_collection__.insert({'table': table, 'choice': 'D', 'n_choice': 3, 'cell_1_1': table[0][0], 'cell_1_2': table[0][1], 'cell_1_3': table[0][2], 'cell_1_4': table[0][3], 'cell_2_1': table[1][0], 'cell_2_2': table[1][1], 'cell_2_3': table[1][2], 'cell_2_4': table[1][3], 'cell_3_1': table[2][0], 'cell_3_2': table[2][1], 'cell_3_3': table[2][2], 'cell_3_4': table[2][3], 'cell_4_1': table[3][0], 'cell_4_2': table[3][1], 'cell_4_3': table[3][2], 'cell_4_4': table[3][3]})
+					__2048_moves_collection__.insert({'game_id': game_id, 'table': table, 'choice': 'D', 'n_choice': 3, 'cell_1_1': table[0][0], 'cell_1_2': table[0][1], 'cell_1_3': table[0][2], 'cell_1_4': table[0][3], 'cell_2_1': table[1][0], 'cell_2_2': table[1][1], 'cell_2_3': table[1][2], 'cell_2_4': table[1][3], 'cell_3_1': table[2][0], 'cell_3_2': table[2][1], 'cell_3_3': table[2][2], 'cell_3_4': table[2][3], 'cell_4_1': table[3][0], 'cell_4_2': table[3][1], 'cell_4_3': table[3][2], 'cell_4_4': table[3][3]})
 				elif choice == 'a':
 					left(driver)
-					__2048_moves_collection__.insert({'table': table, 'choice': 'L', 'n_choice': 4, 'cell_1_1': table[0][0], 'cell_1_2': table[0][1], 'cell_1_3': table[0][2], 'cell_1_4': table[0][3], 'cell_2_1': table[1][0], 'cell_2_2': table[1][1], 'cell_2_3': table[1][2], 'cell_2_4': table[1][3], 'cell_3_1': table[2][0], 'cell_3_2': table[2][1], 'cell_3_3': table[2][2], 'cell_3_4': table[2][3], 'cell_4_1': table[3][0], 'cell_4_2': table[3][1], 'cell_4_3': table[3][2], 'cell_4_4': table[3][3]})
+					__2048_moves_collection__.insert({'game_id': game_id, 'table': table, 'choice': 'L', 'n_choice': 4, 'cell_1_1': table[0][0], 'cell_1_2': table[0][1], 'cell_1_3': table[0][2], 'cell_1_4': table[0][3], 'cell_2_1': table[1][0], 'cell_2_2': table[1][1], 'cell_2_3': table[1][2], 'cell_2_4': table[1][3], 'cell_3_1': table[2][0], 'cell_3_2': table[2][1], 'cell_3_3': table[2][2], 'cell_3_4': table[2][3], 'cell_4_1': table[3][0], 'cell_4_2': table[3][1], 'cell_4_3': table[3][2], 'cell_4_4': table[3][3]})
 				elif choice == 'exit':
 					break
 			move_counter += 1
@@ -119,10 +150,19 @@ def main():
 		score = int(driver.find_element_by_css_selector('div.score-container').text.split('\n')[0])
 		print('Score:', score)
 		print('Number of moves:', move_counter)
-		if not __manual__ and pickle_file is None:
-			with open(str(score) + '_score_2048_game.pickle', 'wb') as f:
-				pickle.dump(classifier, f)
+		if not manual:
+			__2048_results_collection__.insert({'score': score, 'n_moves': move_counter, 'game_id': game_id, 'scaled_data': scaled, 'shuffled_data': shuffle})
+		# if not manual and pickle_file is None:
+		# 	with open(str(score) + '_score_2048_game' + ['', '_s'][scaled] + ['', '_sh'][shuffle] + '.pickle', 'wb') as f:
+		# 		pickle.dump(classifier, f)
 		driver.quit()
+		number_of_repeats -= 1
 
 if __name__ == "__main__":
-    main()
+	n = -1
+	if '-n' in argv:
+		n = int(argv[argv.index('-n')+1])
+	pickled_classifier = None
+	if '-pc' in argv:
+		pickled_classifier = argv[argv.index('-pc')+1]
+	main('-m' in argv, '-s' in argv, '-sh' in argv, n, pickled_classifier)
