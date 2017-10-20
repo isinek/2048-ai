@@ -1,14 +1,15 @@
 from sys import argv
 from time import sleep
 import uuid
+import numpy
 import pandas
 import pickle
 from pymongo import MongoClient
 from selenium import webdriver
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.common.keys import Keys
-from sklearn import cross_validation, linear_model, svm, neighbors
-from sklearn.ensemble import VotingClassifier, RandomForestClassifier
+from sklearn import cross_validation
+from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.tree import DecisionTreeClassifier
 
@@ -86,13 +87,16 @@ def main(manual, scaled, shuffle, number_of_repeats, pickled_classifier):
 					df.drop(['generated'], 1, inplace=True)
 				if shuffle:
 					df = df.sample(frac=1)
-				x, y = df.drop(['n_choice'], 1).values, df['n_choice'].values
-
-				classifier = VotingClassifier([ ('rfc', RandomForestClassifier()),
-												('dtc', DecisionTreeClassifier()),
-												('lr', LogisticRegression()) ])
+				x_train, x_test, y_train, y_test = cross_validation.train_test_split(numpy.array(df.drop(['n_choice'], 1).values), numpy.array(df['n_choice'].values), test_size=0.2)
 				
-				classifier.fit(x, y)
+				if number_of_repeats%2:
+					classifier = RandomForestClassifier()
+				else:
+					classifier = LogisticRegression()
+
+				classifier.fit(x_train, y_train)
+				score = classifier.score(x_test, y_test)
+				print('Prediction score:', score)
 			else:
 				classifier = pickle.load(pickle_file)
 		last_table = None
@@ -102,7 +106,7 @@ def main(manual, scaled, shuffle, number_of_repeats, pickled_classifier):
 			table = parse_table_from_page(driver, scaled)
 			if not manual:
 				# print_table(table)
-				choice = classifier.predict([[table[0][0], table[0][1], table[0][2], table[0][3], table[1][0], table[1][1], table[1][2], table[1][3], table[2][0], table[2][1], table[2][2], table[2][3], table[3][0], table[3][1], table[3][2], table[3][3]]])
+				choice = classifier.predict(numpy.array(table).reshape(1, -1))
 				if table == last_table:
 					illegal_choices += 1
 				else:
@@ -115,7 +119,7 @@ def main(manual, scaled, shuffle, number_of_repeats, pickled_classifier):
 					choice = 4
 				elif illegal_choices == 4:
 					choice = 1
-				elif illegal_choices > 5:
+				elif illegal_choices > 4:
 					break
 				
 				#print(choice)
@@ -152,9 +156,14 @@ def main(manual, scaled, shuffle, number_of_repeats, pickled_classifier):
 		print('Number of moves:', move_counter)
 		if not manual:
 			__2048_results_collection__.insert({'score': score, 'n_moves': move_counter, 'game_id': game_id, 'scaled_data': scaled, 'shuffled_data': shuffle})
-		# if not manual and pickle_file is None:
-		# 	with open(str(score) + '_score_2048_game' + ['', '_s'][scaled] + ['', '_sh'][shuffle] + '.pickle', 'wb') as f:
-		# 		pickle.dump(classifier, f)
+		if not manual and pickle_file is None:
+			classifier_name = ''
+			if number_of_repeats%2:
+				classifier_name = 'RandomForestClassifier'
+			else:
+				classifier_name = 'LogisticRegression'
+			with open(str(score) + '_score_2048_game' + ['', '_s'][scaled] + ['', '_sh'][shuffle] + '_' + classifier_name + '.pickle', 'wb') as f:
+				pickle.dump(classifier, f)
 		driver.quit()
 		number_of_repeats -= 1
 
